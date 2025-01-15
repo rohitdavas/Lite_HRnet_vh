@@ -22,6 +22,10 @@ from config import update_config
 import models
 import torchinfo
 import pathlib
+import onnxruntime 
+import onnx
+import numpy as np
+
 
 
 def parse_args():
@@ -58,6 +62,7 @@ def parse_args():
                         default=None, 
                         help="checkpoint file to load.")
     parser.add_argument("--load_messy_checkpoint", action="store_true", default=False, help="if the official checkpoints are to be used. with this flag, we will try to load with a heuriritic as below to fix the checkpoint.")
+    parser.add_argument("--to_onnx", action="store_true", default=False, help="converts to model to the onnx model.")
 
     args = parser.parse_args()
     return args
@@ -134,6 +139,71 @@ def load_messy_checkpoint(model, checkpoint_path: str):
         print(e)
     
 
+def to_onnx(model, onnx_save_path: str) -> None:
+    """
+    converts the model to onnx file
+    """
+    
+    input = torch.randn(1, 3, 128, 128)
+    input = input.to("cuda")
+    
+    input_names = ["input"]
+    output_names= ["output"]
+    dynamic_axes = {
+        "input": {0: "batch",}, 
+        "output": {0: "batch",}
+    }
+    opset_version = 20
+    
+    torch.onnx.export(model, 
+                      input, 
+                      onnx_save_path, 
+                      verbose=False,
+                      input_names=input_names,
+                      output_names=output_names,
+                      dynamic_axes=dynamic_axes, 
+                      opset_version=opset_version, 
+                      report=True,
+                      verify=True, 
+                      artifacts_dir=os.path.dirname(onnx_save_path)
+                    )
+    
+    print(f"converted to {onnx_save_path}")
+
+    # load the model using the onnxruntime
+    onnx_model = onnx.load(onnx_save_path)
+    onnx.checker.check_model(onnx_model, full_check=True)
+    
+    print(f"loading onnx model from {onnx_save_path}")
+    sess = onnxruntime.InferenceSession(onnx_save_path)
+    
+    input_names = [s.name for s in sess.get_inputs()]
+    output_names = [s.name for s in sess.get_outputs()]
+    input_shapes = {input_names[i]: s.shape for i, s in enumerate(sess.get_inputs())}
+    output_shapes = {output_names[i]: s.shape for i, s in enumerate(sess.get_outputs())}
+    
+    print(f"-> input shapes : {input_shapes}")
+    print(f"-> output shapes : {output_shapes}")
+    
+    print(f"-> input names : {input_names}")
+    print(f"-> output names : {output_names}")
+    
+    # run the session forward 
+    input = np.random.randn(1, 3, 128, 128).astype(np.float32)
+    output = sess.run(output_names, {input_names[0]: input})
+    print(f"input shape : {input.shape}")
+    for k, v in zip(output_names, output):
+        print(f"{k} : {v.shape}")
+        
+    input = np.random.randn(8, 3, 128, 128).astype(np.float32)
+    output = sess.run(output_names, {input_names[0]: input})
+    print(f"input shape : {input.shape}")
+    for k, v in zip(output_names, output):
+        print(f"{k} : {v.shape}")
+    
+    print("done")
+    
+
 
 
 def main():
@@ -156,6 +226,23 @@ def main():
             ckpt= torch.load(args.checkpoint)
             info = model.load_state_dict(ckpt, strict=True)
             print(info)
+            
+    if args.to_onnx is True:
+        
+        # where to save the generated onnx file
+        if args.checkpoint is not None:
+            onnx_file = str(pathlib.Path(args.checkpoint).with_suffix(".onnx"))
+        elif args.cfg is not None:
+            onnx_file = str(pathlib.Path(args.cfg).with_suffix(".onnx"))
+        else:
+            onnx_file = "model.onnx"
+            
+        # convert to onnx with parameters 
+        print(f"onnx model will be saved to : {onnx_file}")
+        to_onnx(model, onnx_file)
+        
+
+
     
 
 if __name__ == '__main__':
