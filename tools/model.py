@@ -55,7 +55,8 @@ def parse_args():
                         default='')
     parser.add_argument("--checkpoint", 
                         type=str,
-                        default=None)
+                        default=None, 
+                        help="checkpoint file to load.")
     parser.add_argument("--load_messy_checkpoint", action="store_true", default=False, help="if the official checkpoints are to be used. with this flag, we will try to load with a heuriritic as below to fix the checkpoint.")
 
     args = parser.parse_args()
